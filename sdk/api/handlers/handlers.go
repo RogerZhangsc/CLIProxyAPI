@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -218,6 +219,19 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	if requestPath != "" {
 		meta[coreexecutor.RequestPathMetadataKey] = requestPath
 	}
+	if ctx != nil {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
+			clientIP := strings.TrimSpace(ginCtx.ClientIP())
+			if clientIP != "" {
+				meta[coreexecutor.SmartRoutingClientIPMetadataKey] = clientIP
+				if isLocalOrPrivateClientIP(clientIP) {
+					if explicitID := firstNonEmptyHeader(ginCtx.Request.Header, "X-Client-Identifier", "X-Client-ID", "X-User-ID"); explicitID != "" {
+						meta[coreexecutor.SmartRoutingIdentityMetadataKey] = explicitID
+					}
+				}
+			}
+		}
+	}
 	if pinnedAuthID := pinnedAuthIDFromContext(ctx); pinnedAuthID != "" {
 		meta[coreexecutor.PinnedAuthMetadataKey] = pinnedAuthID
 	}
@@ -231,6 +245,23 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 		meta[coreexecutor.DisallowFreeAuthMetadataKey] = true
 	}
 	return meta
+}
+
+func firstNonEmptyHeader(headers http.Header, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func isLocalOrPrivateClientIP(raw string) bool {
+	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return addr.IsLoopback() || addr.IsPrivate()
 }
 
 func setReasoningEffortMetadata(meta map[string]any, handlerType, model string, rawJSON []byte) {

@@ -188,7 +188,13 @@ type Manager struct {
 
 	// Auto refresh state
 	refreshCancel context.CancelFunc
+	refreshCtx    context.Context
 	refreshLoop   *authAutoRefreshLoop
+
+	// Smart-routing quota monitor state. It is tied to the auto-refresh lifecycle
+	// because both are background auth maintenance workers.
+	smartRoutingCancel  context.CancelFunc
+	smartRoutingMonitor *smartRoutingMonitor
 
 	requestPrepareLocks sync.Map
 }
@@ -363,6 +369,7 @@ func (m *Manager) SetSelector(selector Selector) {
 		m.scheduler.setSelector(selector)
 		m.syncScheduler()
 	}
+	m.reconcileSmartRoutingMonitor()
 }
 
 // SetStore swaps the underlying persistence store.
@@ -393,6 +400,46 @@ func (m *Manager) SetConfig(cfg *internalconfig.Config) {
 		m.clearHomeRuntimeAuths()
 	}
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
+	m.reconcileSmartRoutingMonitor()
+}
+
+func (m *Manager) configSnapshot() *internalconfig.Config {
+	if m == nil {
+		return &internalconfig.Config{}
+	}
+	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+	if cfg == nil {
+		return &internalconfig.Config{}
+	}
+	return cfg
+}
+
+func (m *Manager) smartRoutingSelector() *SmartRoutingSelector {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	selector := m.selector
+	m.mu.RUnlock()
+	if smart, ok := selector.(*SmartRoutingSelector); ok {
+		return smart
+	}
+	return nil
+}
+
+// SmartRoutingStatus returns the current smart-routing quota and affinity state.
+func (m *Manager) SmartRoutingStatus() map[string]any {
+	status := smartRoutingStatus(m.smartRoutingSelector())
+	cfg := smartRoutingMonitorConfigFromConfig(m.configSnapshot())
+	status["monitor"] = map[string]any{
+		"quotaRefreshInterval":   cfg.QuotaRefreshInterval.String(),
+		"resetMonitorInterval":   cfg.ResetMonitorInterval.String(),
+		"weeklyProbeDriftMax":    smartWeeklyProbeDriftMax.String(),
+		"weeklyRollingTolerance": smartWeeklyRollingTolerance.String(),
+		"probeCooldown":          cfg.ProbeCooldown.String(),
+		"maxConcurrentProbes":    cfg.MaxConcurrentProbes,
+	}
+	return status
 }
 
 // HomeEnabled reports whether the home control plane integration is enabled in the runtime config.
@@ -3882,6 +3929,7 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 	m.mu.Lock()
 	cancelPrev := m.refreshCancel
 	m.refreshCancel = nil
+	m.refreshCtx = nil
 	m.refreshLoop = nil
 	m.mu.Unlock()
 	if cancelPrev != nil {
@@ -3897,19 +3945,23 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 
 	m.mu.Lock()
 	m.refreshCancel = cancelCtx
+	m.refreshCtx = ctx
 	m.refreshLoop = loop
 	m.mu.Unlock()
 
 	loop.rebuild(time.Now())
 	go loop.run(ctx)
+	m.reconcileSmartRoutingMonitor()
 }
 
 // StopAutoRefresh cancels the background refresh loop, if running.
 // It also stops the selector if it implements StoppableSelector.
 func (m *Manager) StopAutoRefresh() {
+	m.stopSmartRoutingMonitor()
 	m.mu.Lock()
 	cancel := m.refreshCancel
 	m.refreshCancel = nil
+	m.refreshCtx = nil
 	m.refreshLoop = nil
 	m.mu.Unlock()
 	if cancel != nil {
@@ -3918,6 +3970,63 @@ func (m *Manager) StopAutoRefresh() {
 	// Stop selector if it implements StoppableSelector (e.g., SessionAffinitySelector)
 	if stoppable, ok := m.selector.(StoppableSelector); ok {
 		stoppable.Stop()
+	}
+}
+
+func (m *Manager) reconcileSmartRoutingMonitor() {
+	if m == nil {
+		return
+	}
+	if m.smartRoutingSelector() == nil {
+		m.stopSmartRoutingMonitor()
+		return
+	}
+	m.mu.RLock()
+	parent := m.refreshCtx
+	m.mu.RUnlock()
+	if parent == nil {
+		m.stopSmartRoutingMonitor()
+		return
+	}
+	m.startSmartRoutingMonitor(parent)
+}
+
+func (m *Manager) startSmartRoutingMonitor(parent context.Context) {
+	if m == nil {
+		return
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	if m.smartRoutingSelector() == nil {
+		m.stopSmartRoutingMonitor()
+		return
+	}
+	ctx, cancelCtx := context.WithCancel(parent)
+	monitor := newSmartRoutingMonitor(m)
+
+	m.mu.Lock()
+	cancelPrev := m.smartRoutingCancel
+	m.smartRoutingCancel = cancelCtx
+	m.smartRoutingMonitor = monitor
+	m.mu.Unlock()
+	if cancelPrev != nil {
+		cancelPrev()
+	}
+	go monitor.run(ctx)
+}
+
+func (m *Manager) stopSmartRoutingMonitor() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	cancel := m.smartRoutingCancel
+	m.smartRoutingCancel = nil
+	m.smartRoutingMonitor = nil
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 

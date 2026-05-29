@@ -32,6 +32,10 @@ const (
 	SelectedAuthCallbackMetadataKey = "selected_auth_callback"
 	// ExecutionSessionMetadataKey identifies a long-lived downstream execution session.
 	ExecutionSessionMetadataKey = "execution_session_id"
+	// SmartRoutingIdentityMetadataKey stores a trusted explicit client identity for smart routing.
+	SmartRoutingIdentityMetadataKey = "smart_routing_identity"
+	// SmartRoutingClientIPMetadataKey stores the downstream client IP for smart routing fallback affinity.
+	SmartRoutingClientIPMetadataKey = "smart_routing_client_ip"
 )
 
 // Request encapsulates the translated payload that will be sent to a provider executor.

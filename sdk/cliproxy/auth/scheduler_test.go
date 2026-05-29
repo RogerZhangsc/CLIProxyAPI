@@ -408,6 +408,14 @@ func TestManager_InitializesSchedulerForBuiltInSelector(t *testing.T) {
 	if manager.scheduler.strategy != schedulerStrategyFillFirst {
 		t.Fatalf("manager.scheduler.strategy = %v, want %v", manager.scheduler.strategy, schedulerStrategyFillFirst)
 	}
+
+	manager.SetSelector(NewSmartRoutingSelector())
+	if manager.scheduler.strategy != schedulerStrategyCustom {
+		t.Fatalf("manager.scheduler.strategy = %v, want custom for smart-routing", manager.scheduler.strategy)
+	}
+	if manager.useSchedulerFastPath() {
+		t.Fatalf("manager.useSchedulerFastPath() = true, want false for smart-routing selector")
+	}
 }
 
 func TestManager_SchedulerTracksRegisterAndUpdate(t *testing.T) {

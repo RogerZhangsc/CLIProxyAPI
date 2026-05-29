@@ -27,6 +27,7 @@ auths/*
 
 # Documentation
 docs/*
+!docs/smart-routing.md
 AGENTS.md
 CLAUDE.md
 GEMINI.md

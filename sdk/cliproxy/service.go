@@ -507,6 +507,8 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 		switch strategy {
 		case "fill-first", "fillfirst", "ff":
 			return "fill-first"
+		case "smart-routing", "smartrouting", "smart":
+			return "smart-routing"
 		default:
 			return "round-robin"
 		}
@@ -526,11 +528,21 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 		switch nextStrategy {
 		case "fill-first":
 			selector = &coreauth.FillFirstSelector{}
+		case "smart-routing":
+			ttl := time.Duration(0)
+			if ttlStr := strings.TrimSpace(nextSessionAffinityTTL); ttlStr != "" {
+				if parsed, err := time.ParseDuration(ttlStr); err == nil && parsed > 0 {
+					ttl = parsed
+				}
+			}
+			selector = coreauth.NewSmartRoutingSelectorWithConfig(coreauth.SmartRoutingConfig{
+				TTL: ttl,
+			})
 		default:
 			selector = &coreauth.RoundRobinSelector{}
 		}
 
-		if nextSessionAffinity {
+		if nextSessionAffinity && nextStrategy != "smart-routing" {
 			ttl := time.Hour
 			if ttlStr := strings.TrimSpace(nextSessionAffinityTTL); ttlStr != "" {
 				if parsed, err := time.ParseDuration(ttlStr); err == nil && parsed > 0 {

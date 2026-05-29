@@ -211,6 +211,7 @@ func (b *Builder) Build() (*Service, error) {
 		strategy := ""
 		sessionAffinity := false
 		sessionAffinityTTL := time.Hour
+		smartRoutingTTL := time.Duration(0)
 		if b.cfg != nil {
 			strategy = strings.ToLower(strings.TrimSpace(b.cfg.Routing.Strategy))
 			// Support both legacy ClaudeCodeSessionAffinity and new universal SessionAffinity
@@ -218,6 +219,7 @@ func (b *Builder) Build() (*Service, error) {
 			if ttlStr := strings.TrimSpace(b.cfg.Routing.SessionAffinityTTL); ttlStr != "" {
 				if parsed, err := time.ParseDuration(ttlStr); err == nil && parsed > 0 {
 					sessionAffinityTTL = parsed
+					smartRoutingTTL = parsed
 				}
 			}
 		}
@@ -225,12 +227,16 @@ func (b *Builder) Build() (*Service, error) {
 		switch strategy {
 		case "fill-first", "fillfirst", "ff":
 			selector = &coreauth.FillFirstSelector{}
+		case "smart-routing", "smartrouting", "smart":
+			selector = coreauth.NewSmartRoutingSelectorWithConfig(coreauth.SmartRoutingConfig{
+				TTL: smartRoutingTTL,
+			})
 		default:
 			selector = &coreauth.RoundRobinSelector{}
 		}
 
 		// Wrap with session affinity if enabled (failover is always on)
-		if sessionAffinity {
+		if sessionAffinity && strategy != "smart-routing" && strategy != "smartrouting" && strategy != "smart" {
 			selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
 				Fallback: selector,
 				TTL:      sessionAffinityTTL,

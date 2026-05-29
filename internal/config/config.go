@@ -224,7 +224,7 @@ type QuotaExceeded struct {
 // RoutingConfig configures how credentials are selected for requests.
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
-	// Supported values: "round-robin" (default), "fill-first".
+	// Supported values: "round-robin" (default), "fill-first", "smart-routing".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// SessionAffinity enables universal session-sticky routing for all clients.
@@ -238,6 +238,19 @@ type RoutingConfig struct {
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
+
+	// SmartQuotaRefreshInterval controls how often smart-routing refreshes quota snapshots.
+	// Default: 10m.
+	SmartQuotaRefreshInterval string `yaml:"smart-quota-refresh-interval,omitempty" json:"smartQuotaRefreshInterval,omitempty"`
+	// SmartResetMonitorInterval controls how often smart-routing checks reset windows.
+	// Default: 1m.
+	SmartResetMonitorInterval string `yaml:"smart-reset-monitor-interval,omitempty" json:"smartResetMonitorInterval,omitempty"`
+	// SmartProbeCooldown controls the minimum interval between probes for one auth file.
+	// Default: 5m.
+	SmartProbeCooldown string `yaml:"smart-probe-cooldown,omitempty" json:"smartProbeCooldown,omitempty"`
+	// SmartMaxConcurrentProbes limits concurrent smart-routing reset probes.
+	// Default: 3.
+	SmartMaxConcurrentProbes int `yaml:"smart-max-concurrent-probes,omitempty" json:"smartMaxConcurrentProbes,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
